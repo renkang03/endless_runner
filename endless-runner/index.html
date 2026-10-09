@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Endless Runner</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    body { display: flex; align-items: center; justify-content: center; }
+    canvas { background: #fff; max-width: 100%; touch-action: none; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Plain scripts (not ES modules) so the game works when you double-click
+       index.html. Modules are blocked on file:// URLs by the browser.
+       ORDER MATTERS: each file uses globals defined by the ones above it. -->
+  <script src="game.js"></script>
+  <script src="input.js"></script>
+  <script src="render.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
