@@ -10,7 +10,10 @@ const Game = (function () {
     HEIGHT: 300,
     GROUND_Y: 240,
     STEP: 1 / 60,
-    START_SPEED: 300,
+    START_SPEED: 300,    // world scroll speed at the start, px/s
+    MAX_SPEED: 700,      // speed stops increasing here
+    ACCELERATION: 6,     // px/s gained every second (300 -> 700 takes ~67 s)
+    PX_PER_POINT: 30,    // distance needed for 1 score point (300 px/s = 10 pts/s)
     TICK_SPACING: 40,
 
     PLAYER_X: 80,
@@ -74,10 +77,11 @@ const Game = (function () {
         ducking: false,
       },
       prevJumpHeld: false,
-      obstacles: [],           // each: { x, y, w, h, type, passed }
+      obstacles: [],           // each: { x, y, w, h, type }
       spawnTimer: CONFIG.FIRST_SPAWN_DELAY,
       spawnedCount: 0,
-      score: 0,                // obstacles successfully passed
+      distance: 0,             // total pixels travelled
+      score: 0,                // derived from distance (whole points)
       gameOver: false,
       deadTime: 0,             // seconds since dying
     };
@@ -99,7 +103,6 @@ const Game = (function () {
     state.obstacles.push({
       x: C.WIDTH, y: y, w: w, h: h,
       type: isAir ? 'air' : 'ground',
-      passed: false,
     });
     state.spawnedCount++;
   }
@@ -134,6 +137,16 @@ const Game = (function () {
     }
 
     state.time += dt;
+
+    // ---- Speed ramp, distance and score ------------------------------------
+    // Speed grows by a constant amount per second (a constant acceleration)
+    // until it hits MAX_SPEED. Distance is speed accumulated over time
+    // (distance += speed * dt), and score is just distance in bigger units.
+    // So the faster you go, the faster your score climbs.
+    state.speed = Math.min(C.MAX_SPEED, state.speed + C.ACCELERATION * dt);
+    state.distance += state.speed * dt;
+    state.score = Math.floor(state.distance / C.PX_PER_POINT);
+
     state.groundOffset = (state.groundOffset + state.speed * dt) % C.TICK_SPACING;
 
     // ---- Jump start (edge detection) --------------------------------------
@@ -179,18 +192,10 @@ const Game = (function () {
       state.spawnTimer += randomRange(state, C.SPAWN_MIN, C.SPAWN_MAX);
     }
 
-    // ---- Move obstacles, score, remove ------------------------------------
+    // ---- Move obstacles, remove the ones that left the screen --------------
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       const o = state.obstacles[i];
       o.x -= state.speed * dt;
-
-      // Score: +1 the moment an obstacle is completely behind the player.
-      // The `passed` flag makes sure each obstacle only counts once.
-      if (!o.passed && o.x + o.w < p.x) {
-        o.passed = true;
-        state.score++;
-      }
-
       if (o.x + o.w < 0) state.obstacles.splice(i, 1);
     }
 
