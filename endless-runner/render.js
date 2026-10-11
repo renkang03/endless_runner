@@ -113,48 +113,59 @@ const Render = (function () {
     ],
   };
 
-  // The dragon faces you. Only the LEFT half is written out and then mirrored.
-  // Half is 5 wide -> 10 x 25 art pixels -> 60 x 150 game units (6 each).
-  // (The wings are not in this art: they flap, so they are drawn in code.)
+  // The dragon flies in profile, facing left, in the colours of a sky-blue plush:
+  // blue body, white wing/snout/ears, small rainbow spines along the back.
+  // 12 x 19 art pixels -> 96 x 152 game units (8 each). Two wing frames.
   const DRAGON_PAL = {
-    G: '#3b8a3f', D: '#1f5a24',   // green scales, dark crest
-    y: '#d9b84a',                 // belly
-    h: '#efe6c8', c: '#efe6c8',   // horns, claws
-    Y: '#ffeb3b', p: '#111111',   // eye, pupil
-    w: '#ffffff', m: '#c62828',   // teeth, mouth
+    B: '#7ec8ee', b: '#4f9fcf', s: '#c9e8f8',   // body, shade, light belly
+    W: '#ffffff', e: '#1b2430',                 // wing/snout/ears, eye
+    o: '#f28c28', y: '#f7d23c', g: '#4caf50', r: '#e53935',  // rainbow spines
   };
-  const DRAGON_HALF = [
-    'h....',
-    'hh...',
-    '.hGDD',
-    '.GGGD',
-    '.GYpG',
-    '.GGGG',
-    '..GGG',
-    '..wGm',
-    '...GG',
-    '...GG',
-    '..GGy',
-    '.GGGy',
-    '.GGGy',
-    '.GGGy',
-    '.GGGy',
-    '..GGy',
-    '..GGy',
-    '..GGy',
-    '..GGy',
-    '.GGGy',
-    '.GGG.',
-    '.GGG.',
-    '.GGG.',
-    'cGGG.',
-    'ccGG.',
-  ];
-  const DRAGON_BODY = DRAGON_HALF.map(function (row) {
-    return row + row.split('').reverse().join('');
-  });
-  const WING_MEMBRANE = '#b8372e';
-  const WING_BONE = '#2a3d2b';
+  const DRAGON = {
+    up: [
+      '.W.W....W.W.',
+      '.BBBBo..WWW.',
+      'WWBeBBy.WWW.',
+      'WWBBBBg.WW..',
+      '.BBBBBr.WW..',
+      '..BBBBoWW...',
+      '..BBBByW....',
+      '..BBBBBg....',
+      '..BBBBBBr...',
+      '.BBBBBBBBo..',
+      '.BsBBBBBBBy.',
+      '.BsssBBBBBBg',
+      '.BsssBBBBBr.',
+      '..BBBBBBBo..',
+      '..bB..bBBBy.',
+      '..WW..WW.BBB',
+      '.........BBB',
+      '..........BB',
+      '...........B',
+    ],
+    down: [
+      '.W.W........',
+      '.BBBBo......',
+      'WWBeBBy.....',
+      'WWBBBBg.....',
+      '.BBBBBr.....',
+      '..BBBBo.....',
+      '..BBBBy.....',
+      '..BBBBBg....',
+      '..BBBBBBrW..',
+      '.BBBBBBBBoWW',
+      '.BsBBBBBBBWW',
+      '.BsssBBBBBWW',
+      '.BsssBBBBWWW',
+      '..BBBBBBBWW.',
+      '..bB..bBBWWy',
+      '..WW..WW.WBB',
+      '.........BBB',
+      '..........BB',
+      '...........B',
+    ],
+  };
+  const WING_NOTE = 'wings are part of the DRAGON frames now';
 
   const CLOUD_PAL = { w: '#ffffff' };
   const CLOUD = [
@@ -237,7 +248,8 @@ const Render = (function () {
     }
     for (const k in PLAYER) a.player[k] = makeSprite(PLAYER[k], PLAYER_PAL);
     for (const k in BIRD) a.bird[k] = makeSprite(BIRD[k], BIRD_PAL);
-    a.dragon = makeSprite(DRAGON_BODY, DRAGON_PAL);
+    a.dragon = {};
+    for (const k in DRAGON) a.dragon[k] = makeSprite(DRAGON[k], DRAGON_PAL);
     a.cloud = makeSprite(CLOUD, CLOUD_PAL);
     return a;
   }
@@ -324,42 +336,6 @@ const Render = (function () {
     return (h ^ (h >>> 16)) >>> 0;
   }
 
-  // ---- Geometry helpers for the dragon's flapping wings -------------------------
-  function sideOf(px, py, a, b) { return (px - b[0]) * (a[1] - b[1]) - (a[0] - b[0]) * (py - b[1]); }
-
-  function inTriangle(px, py, a, b, c) {
-    const d1 = sideOf(px, py, a, b), d2 = sideOf(px, py, b, c), d3 = sideOf(px, py, c, a);
-    const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
-    const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
-    return !(hasNeg && hasPos); // all on the same side = inside
-  }
-
-  function distToSegment(px, py, a, b) {
-    const dx = b[0] - a[0], dy = b[1] - a[1];
-    const t = clamp(((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy), 0, 1);
-    return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
-  }
-
-  // Each wing is a triangle with its base on the dragon's shoulder and its tip
-  // swinging up and down. Cells inside the triangle become "pixels", so it
-  // looks like the same pixel art as everything else. The right wing is the
-  // mirror image of the left. The wings are drawn OUTSIDE the hitbox, for show.
-  function drawDragonWings(ctx, o, time) {
-    const U = o.w / 10;                                // one art pixel, in game units
-    const tipY = 10.5 + 9.5 * Math.sin(time * 10);     // up (1) .. down (20)
-    const root1 = [1.5, 11], root2 = [1.5, 15.5], tip = [-8, tipY];
-    const x0 = Math.round(o.x), y0 = Math.round(o.y);
-    for (let r = 0; r < 25; r++) {
-      for (let c = -8; c <= 1; c++) {
-        const px = c + 0.5, py = r + 0.5;
-        if (!inTriangle(px, py, root1, root2, tip)) continue;
-        ctx.fillStyle = distToSegment(px, py, root1, tip) < 0.8 ? WING_BONE : WING_MEMBRANE;
-        ctx.fillRect(x0 + c * U, y0 + r * U, U + 0.5, U + 0.5);        // left wing cell
-        ctx.fillRect(x0 + (9 - c) * U, y0 + r * U, U + 0.5, U + 0.5);  // mirrored cell
-      }
-    }
-  }
-
   // ---- The ground: rows of Minecraft blocks that scroll with the distance run ----
   function drawGround(ctx, state, night) {
     const B = C.BLOCK;
@@ -407,8 +383,8 @@ const Render = (function () {
       const flap = Math.floor(state.time * 7) % 2 === 0 ? assets.bird.up : assets.bird.down;
       ctx.drawImage(flap, x, y, o.w, o.h);
     } else if (o.type === 'dragon') {
-      drawDragonWings(ctx, o, state.time);
-      ctx.drawImage(assets.dragon, x, y, o.w, o.h);
+      const f = Math.floor(state.time * 5) % 2 === 0 ? assets.dragon.up : assets.dragon.down;
+      ctx.drawImage(f, x, y, o.w, o.h);
     }
   }
 
@@ -552,7 +528,7 @@ const Render = (function () {
 
   // `art` is exported so the sprite grids can be checked by a test.
   const art = {
-    player: PLAYER, bird: BIRD, dragonHalf: DRAGON_HALF, cloud: CLOUD,
+    player: PLAYER, bird: BIRD, dragon: DRAGON, cloud: CLOUD,
     palettes: { player: PLAYER_PAL, bird: BIRD_PAL, dragon: DRAGON_PAL, cloud: CLOUD_PAL },
   };
 

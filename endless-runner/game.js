@@ -53,10 +53,19 @@ const Game = (function () {
     // height as the bird's. The ONLY way past is to duck.
     // (The tallest jump lifts your feet 154 px; the dragon's top is 184 px up.)
     DRAGON_CHANCE: 0.14,
-    DRAGON_W: 60,            // the hitbox; the wings are drawn wider, for show
-    DRAGON_H: 150,
+    DRAGON_W: 96,            // side view: wider than tall-ish body, 12 art pixels of 8
+    DRAGON_H: 152,           // 19 art pixels of 8
     DRAGON_MIN_SCORE: 150,   // dragons only appear once you've warmed up
-    DRAGON_SPAWN_PAD: 48,    // spawn this far off-screen so the wings slide in
+    DRAGON_SPAWN_PAD: 0,     // (wings are part of the sprite now, nothing pops in)
+
+    // Density ramp. Below DENSITY_START_SCORE spawning is exactly as before so
+    // you can learn the game. After it, the gap between obstacles shrinks
+    // linearly until DENSITY_FULL_SCORE, where gaps are DENSITY_MIN_SCALE of
+    // normal. MIN_GAP (seconds) is a floor so a fair path always exists.
+    DENSITY_START_SCORE: 500,
+    DENSITY_FULL_SCORE: 3000,
+    DENSITY_MIN_SCALE: 0.6,
+    MIN_GAP: 0.62,
 
     RESTART_DELAY: 0.5,      // seconds after death before restart is allowed
   };
@@ -72,6 +81,14 @@ const Game = (function () {
 
   function randomRange(state, min, max) {
     return min + random(state) * (max - min);
+  }
+
+  // 1 = normal gaps; smaller = obstacles come more often.
+  function spawnScale(score) {
+    const C = CONFIG;
+    const t = Math.min(1, Math.max(0, (score - C.DENSITY_START_SCORE) /
+                                      (C.DENSITY_FULL_SCORE - C.DENSITY_START_SCORE)));
+    return 1 - (1 - C.DENSITY_MIN_SCALE) * t;
   }
 
   function createState(seed) {
@@ -243,7 +260,8 @@ const Game = (function () {
     state.spawnTimer -= dt;
     if (state.spawnTimer <= 0) {
       spawnObstacle(state);
-      state.spawnTimer += randomRange(state, C.SPAWN_MIN, C.SPAWN_MAX);
+      state.spawnTimer += Math.max(C.MIN_GAP,
+        randomRange(state, C.SPAWN_MIN, C.SPAWN_MAX) * spawnScale(state.score));
     }
 
     // ---- Move obstacles, remove the ones that left the screen --------------
@@ -265,7 +283,7 @@ const Game = (function () {
     }
   }
 
-  return { CONFIG, createState, update, overlaps, playerHitbox };
+  return { CONFIG, createState, update, overlaps, playerHitbox, spawnScale };
 })();
 
 if (typeof module !== 'undefined') module.exports = Game;
