@@ -19,7 +19,7 @@ const Game = (function () {
     PLAYER_X: 80,
     PLAYER_W: 40,
     PLAYER_H: 50,
-    DUCK_H: 26,          // shorter hitbox while ducking
+    DUCK_H: 25,          // shorter hitbox while ducking
     HITBOX_INSET: 3,     // player's hitbox is this many px smaller on each side
 
     GRAVITY: 1800,
@@ -27,23 +27,36 @@ const Game = (function () {
     CUT_GRAVITY_MULT: 3, // released jump early -> stronger gravity while rising
     FAST_FALL_MULT: 3,   // holding Down in the air -> stronger gravity
 
-    // Obstacles
-    OBSTACLE_MIN_W: 20,
-    OBSTACLE_MAX_W: 40,
-    OBSTACLE_MIN_H: 30,
-    OBSTACLE_MAX_H: 50,
+    // ---- Obstacles -----------------------------------------------------------
     FIRST_SPAWN_DELAY: 1.5,
     SPAWN_MIN: 0.9,
     SPAWN_MAX: 1.8,
+    OFFSCREEN_MARGIN: 60,    // obstacles are removed this far past the left edge
+                             // (so wings and such are fully gone before deletion)
+
+    // Stone blocks: stacks of BLOCK x BLOCK squares, like Minecraft.
+    BLOCK: 20,
+    GROUND_MAX_COLS: 2,      // 1-2 blocks wide
+    GROUND_MAX_ROWS: 3,      // 1-3 blocks tall (20, 40 or 60 px)
 
     // Flying obstacles. Their BOTTOM edge is AIR_BOTTOM_OFFSET px above the
-    // ground: that's lower than a standing player's head (50 px) but higher
-    // than a ducking player's head (26 px), so you must duck (or jump very high).
-    AIR_CHANCE: 0.3,         // probability that a spawn is a flying obstacle
-    AIR_MIN_W: 34,
-    AIR_MAX_W: 50,
-    AIR_H: 60,
+    // ground: lower than a standing player's head (50 px) but higher than a
+    // ducking player's head (25 px), so you must duck.
     AIR_BOTTOM_OFFSET: 34,
+
+    // Bird: small, so a full-height jump can clear it (but ducking is easier).
+    AIR_CHANCE: 0.28,        // probability that a spawn is a bird
+    BIRD_W: 48,
+    BIRD_H: 36,
+
+    // Dragon: so tall that no jump can clear it, and its bottom is at the same
+    // height as the bird's. The ONLY way past is to duck.
+    // (The tallest jump lifts your feet 154 px; the dragon's top is 184 px up.)
+    DRAGON_CHANCE: 0.14,
+    DRAGON_W: 60,            // the hitbox; the wings are drawn wider, for show
+    DRAGON_H: 150,
+    DRAGON_MIN_SCORE: 150,   // dragons only appear once you've warmed up
+    DRAGON_SPAWN_PAD: 48,    // spawn this far off-screen so the wings slide in
 
     RESTART_DELAY: 0.5,      // seconds after death before restart is allowed
   };
@@ -77,33 +90,63 @@ const Game = (function () {
         ducking: false,
       },
       prevJumpHeld: false,
-      obstacles: [],           // each: { x, y, w, h, type }
+      obstacles: [],           // each: { type: 'stone'|'bird'|'dragon', x, y, w, h }
       spawnTimer: CONFIG.FIRST_SPAWN_DELAY,
       spawnedCount: 0,
       distance: 0,             // total pixels travelled
       score: 0,                // derived from distance (whole points)
       gameOver: false,
       deadTime: 0,             // seconds since dying
+
+      // Things that happened during the most recent update() step, as plain
+      // strings: 'jump', 'land', 'die', 'milestone'. update() empties this at
+      // the start of every step, so read it after each step. The game never
+      // plays sounds itself; main.js reads these and decides what to do.
+      events: [],
     };
   }
 
   function spawnObstacle(state) {
     const C = CONFIG;
-    const isAir = random(state) < C.AIR_CHANCE;
-    let w, h, y;
-    if (isAir) {
-      w = randomRange(state, C.AIR_MIN_W, C.AIR_MAX_W);
-      h = C.AIR_H;
-      y = C.GROUND_Y - C.AIR_BOTTOM_OFFSET - h; // y is the TOP edge
+    // One random number picks the kind. The ranges are stacked:
+    //   [0, AIR_CHANCE)                       -> bird
+    //   [AIR_CHANCE, AIR+DRAGON_CHANCE)       -> dragon (if unlocked)
+    //   everything else                       -> stone blocks
+    const roll = random(state);
+    let obstacle;
+
+    if (roll < C.AIR_CHANCE) {
+      obstacle = {
+        type: 'bird',
+        x: C.WIDTH,
+        w: C.BIRD_W,
+        h: C.BIRD_H,
+        y: C.GROUND_Y - C.AIR_BOTTOM_OFFSET - C.BIRD_H, // y is the TOP edge
+      };
+    } else if (roll < C.AIR_CHANCE + C.DRAGON_CHANCE && state.score >= C.DRAGON_MIN_SCORE) {
+      obstacle = {
+        type: 'dragon',
+        x: C.WIDTH + C.DRAGON_SPAWN_PAD,
+        w: C.DRAGON_W,
+        h: C.DRAGON_H,
+        y: C.GROUND_Y - C.AIR_BOTTOM_OFFSET - C.DRAGON_H,
+      };
     } else {
-      w = randomRange(state, C.OBSTACLE_MIN_W, C.OBSTACLE_MAX_W);
-      h = randomRange(state, C.OBSTACLE_MIN_H, C.OBSTACLE_MAX_H);
-      y = C.GROUND_Y - h;
+      // A wall of 1-2 x 1-3 stone blocks. `variant` picks which texture each
+      // block uses (the renderer's business, but chosen here so it's stable).
+      const cols = 1 + Math.floor(random(state) * C.GROUND_MAX_COLS);
+      const rows = 1 + Math.floor(random(state) * C.GROUND_MAX_ROWS);
+      obstacle = {
+        type: 'stone',
+        x: C.WIDTH,
+        w: cols * C.BLOCK,
+        h: rows * C.BLOCK,
+        y: C.GROUND_Y - rows * C.BLOCK,
+        variant: Math.floor(random(state) * 3),
+      };
     }
-    state.obstacles.push({
-      x: C.WIDTH, y: y, w: w, h: h,
-      type: isAir ? 'air' : 'ground',
-    });
+
+    state.obstacles.push(obstacle);
     state.spawnedCount++;
   }
 
@@ -130,6 +173,8 @@ const Game = (function () {
     const C = CONFIG;
     const p = state.player;
 
+    state.events = []; // forget last step's events
+
     // Dead: freeze the world, just count how long we've been dead.
     if (state.gameOver) {
       state.deadTime += dt;
@@ -143,18 +188,26 @@ const Game = (function () {
     // until it hits MAX_SPEED. Distance is speed accumulated over time
     // (distance += speed * dt), and score is just distance in bigger units.
     // So the faster you go, the faster your score climbs.
+    const prevScore = state.score;
     state.speed = Math.min(C.MAX_SPEED, state.speed + C.ACCELERATION * dt);
     state.distance += state.speed * dt;
     state.score = Math.floor(state.distance / C.PX_PER_POINT);
 
+    // Every 100 points: tell the outside world (it plays a little chime).
+    if (Math.floor(state.score / 100) > Math.floor(prevScore / 100)) {
+      state.events.push('milestone');
+    }
+
     state.groundOffset = (state.groundOffset + state.speed * dt) % C.TICK_SPACING;
 
     // ---- Jump start (edge detection) --------------------------------------
+    const wasAirborne = !p.onGround; // remembered so we can detect landing below
     const jumpPressed = input.jumpHeld && !state.prevJumpHeld;
     state.prevJumpHeld = input.jumpHeld;
     if (jumpPressed && p.onGround) {
       p.vy = -C.JUMP_SPEED;
       p.onGround = false;
+      state.events.push('jump');
     }
 
     // ---- Ducking ----------------------------------------------------------
@@ -183,6 +236,7 @@ const Game = (function () {
       p.y = standingY;
       p.vy = 0;
       p.onGround = true;
+      if (wasAirborne) state.events.push('land'); // was in the air, now isn't
     }
 
     // ---- Spawn ------------------------------------------------------------
@@ -196,7 +250,7 @@ const Game = (function () {
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       const o = state.obstacles[i];
       o.x -= state.speed * dt;
-      if (o.x + o.w < 0) state.obstacles.splice(i, 1);
+      if (o.x + o.w < -C.OFFSCREEN_MARGIN) state.obstacles.splice(i, 1);
     }
 
     // ---- Collision --------------------------------------------------------
@@ -205,6 +259,7 @@ const Game = (function () {
       if (overlaps(hit, o)) {
         state.gameOver = true;
         state.deadTime = 0;
+        state.events.push('die');
         break;
       }
     }
