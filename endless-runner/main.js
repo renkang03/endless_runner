@@ -100,7 +100,16 @@ function frame(now) {
 
   // One-shot events. Read both every frame so stale presses never pile up.
   const pressed = input.takePress();
-  if (input.takePause() && started && !state.gameOver) paused = !paused;
+  const pausePressed = input.takePause();
+  if (paused && pressed) {
+    // Any tap or Space/Enter resumes, so touch players aren't stuck. Like the
+    // start screen, the press that resumes must not also jump.
+    paused = false;
+    input.consume();
+    state.prevJumpHeld = input.jumpHeld;
+  } else if (pausePressed && started && !state.gameOver) {
+    paused = !paused;
+  }
 
   if (!started && pressed) {
     started = true;

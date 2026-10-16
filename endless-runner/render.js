@@ -9,8 +9,9 @@
 // 2. PIXEL ART FROM TEXT. Every character and enemy is a small grid of letters
 //    (one letter = one coloured pixel) turned into a tiny canvas once, then
 //    stretched up with smoothing OFF so the pixels stay sharp. No image files.
-//    Each sprite is drawn exactly into its HITBOX rectangle, so what you see is
-//    what can hurt you.
+//    Each sprite is drawn exactly into its obstacle rectangle, and the hitboxes
+//    in game.js (obstacleHitboxes) skip the sprites' empty corners, so what you
+//    see is what can hurt you.
 
 const Render = (function () {
   const C = Game.CONFIG;
@@ -165,7 +166,6 @@ const Render = (function () {
       '...........B',
     ],
   };
-  const WING_NOTE = 'wings are part of the DRAGON frames now';
 
   const CLOUD_PAL = { w: '#ffffff' };
   const CLOUD = [
@@ -467,7 +467,9 @@ const Render = (function () {
     if (ui.debug) {
       ctx.lineWidth = 1;
       ctx.strokeStyle = '#ff2bd6';
-      for (const o of state.obstacles) ctx.strokeRect(o.x + 0.5, o.y + 0.5, o.w - 1, o.h - 1);
+      for (const o of state.obstacles) {
+        for (const b of Game.obstacleHitboxes(o)) ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      }
       const hb = Game.playerHitbox(p);
       ctx.strokeStyle = '#00e0ff';
       ctx.strokeRect(hb.x + 0.5, hb.y + 0.5, hb.w - 1, hb.h - 1);
@@ -514,15 +516,16 @@ const Render = (function () {
         text(ctx, 'High score: ' + (ui.highScore || 0), cx, cy + 28 * u, 20 * u, 'center', pal.sub);
       }
       if (state.deadTime >= C.RESTART_DELAY) {
-        text(ctx, 'Press Space to restart', cx, cy + 65 * u, 18 * u, 'center', pal.sub);
+        text(ctx, 'Tap or press Space to restart', cx, cy + 65 * u, 18 * u, 'center', pal.sub);
       }
     } else if (ui.paused) {
       text(ctx, 'PAUSED', cx, cy - 10 * u, 40 * u, 'center', pal.fg);
-      text(ctx, 'Press P to resume', cx, cy + 30 * u, 18 * u, 'center', pal.sub);
+      text(ctx, 'Tap or press P to resume', cx, cy + 30 * u, 18 * u, 'center', pal.sub);
     } else if (ui.start) {
       text(ctx, 'ENDLESS RUNNER', cx, cy - 25 * u, 40 * u, 'center', pal.fg);
       text(ctx, 'Press Space or tap to start', cx, cy + 15 * u, 20 * u, 'center', pal.sub);
       text(ctx, 'Jump stone blocks. Duck birds and dragons.', cx, cy + 45 * u, 14 * u, 'center', pal.sub);
+      text(ctx, 'Touch: left side = jump, right side = duck', cx, cy + 68 * u, 14 * u, 'center', pal.sub);
     }
   }
 

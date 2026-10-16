@@ -25,15 +25,24 @@ const Input = (function () {
     };
 
     let keyJump = false;      // is a jump key physically down?
-    let pointerJump = false;  // is a finger/mouse physically down?
+    let keyDuck = false;      // is the Down key physically down?
+    // Every finger/mouse button currently down, by pointerId -> 'jump' | 'duck'.
+    // A map (not one flag) so two thumbs can jump and duck at the same time.
+    const pointers = new Map();
     let tapPending = false;   // a press happened that no update() has seen yet
     let pressPending = false; // one-shot: "a press happened" (for restart)
     let pausePending = false; // one-shot: "pause was pressed"
 
+    function pointersDoing(action) {
+      for (const a of pointers.values()) if (a === action) return true;
+      return false;
+    }
+
     // jumpHeld = "down right now" OR "pressed and not yet seen by the game".
     // A very quick tap could otherwise start and end between two update steps.
     function refresh() {
-      input.jumpHeld = keyJump || pointerJump || tapPending;
+      input.jumpHeld = keyJump || pointersDoing('jump') || tapPending;
+      input.duckHeld = keyDuck || pointersDoing('duck');
     }
 
     function consume() {
@@ -53,7 +62,8 @@ const Input = (function () {
         refresh();
       } else if (e.code === 'ArrowDown') {
         e.preventDefault();
-        input.duckHeld = true;
+        keyDuck = true;
+        refresh();
       }
       if (!e.repeat) { // ignore the OS repeating a held key
         if (PRESS_KEYS.has(e.code)) pressPending = true;
@@ -66,25 +76,31 @@ const Input = (function () {
         keyJump = false;
         refresh();
       } else if (e.code === 'ArrowDown') {
-        input.duckHeld = false;
+        keyDuck = false;
+        refresh();
       }
     });
 
-    // Touch / mouse: pressing the canvas = jump, releasing = let go.
+    // Touch: left half of the screen = jump, right half = duck (hold it).
+    // Mouse: a click anywhere = jump, since a mouse player has the keyboard too.
+    // Any press also counts as a one-shot press (start, resume, restart).
     target.addEventListener('pointerdown', function (e) {
       e.preventDefault();
-      pointerJump = true;
-      tapPending = true;
+      const isTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
+      const action = isTouch && e.clientX >= window.innerWidth / 2 ? 'duck' : 'jump';
+      pointers.set(e.pointerId, action);
+      if (action === 'jump') tapPending = true;
       pressPending = true;
       refresh();
     });
-    window.addEventListener('pointerup', function () { pointerJump = false; refresh(); });
-    window.addEventListener('pointercancel', function () { pointerJump = false; refresh(); });
+    function release(e) { pointers.delete(e.pointerId); refresh(); }
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
 
     // If the window loses focus while a key is down we'd never get the keyup.
     window.addEventListener('blur', function () {
-      keyJump = false; pointerJump = false; tapPending = false;
-      input.duckHeld = false;
+      keyJump = false; keyDuck = false; tapPending = false;
+      pointers.clear();
       refresh();
     });
 

@@ -56,7 +56,6 @@ const Game = (function () {
     DRAGON_W: 96,            // side view: wider than tall-ish body, 12 art pixels of 8
     DRAGON_H: 152,           // 19 art pixels of 8
     DRAGON_MIN_SCORE: 150,   // dragons only appear once you've warmed up
-    DRAGON_SPAWN_PAD: 0,     // (wings are part of the sprite now, nothing pops in)
 
     // Density ramp. Below DENSITY_START_SCORE spawning is exactly as before so
     // you can learn the game. After it, the gap between obstacles shrinks
@@ -109,7 +108,6 @@ const Game = (function () {
       prevJumpHeld: false,
       obstacles: [],           // each: { type: 'stone'|'bird'|'dragon', x, y, w, h }
       spawnTimer: CONFIG.FIRST_SPAWN_DELAY,
-      spawnedCount: 0,
       distance: 0,             // total pixels travelled
       score: 0,                // derived from distance (whole points)
       gameOver: false,
@@ -143,7 +141,7 @@ const Game = (function () {
     } else if (roll < C.AIR_CHANCE + C.DRAGON_CHANCE && state.score >= C.DRAGON_MIN_SCORE) {
       obstacle = {
         type: 'dragon',
-        x: C.WIDTH + C.DRAGON_SPAWN_PAD,
+        x: C.WIDTH,
         w: C.DRAGON_W,
         h: C.DRAGON_H,
         y: C.GROUND_Y - C.AIR_BOTTOM_OFFSET - C.DRAGON_H,
@@ -164,7 +162,6 @@ const Game = (function () {
     }
 
     state.obstacles.push(obstacle);
-    state.spawnedCount++;
   }
 
   // ---- AABB collision -------------------------------------------------------
@@ -183,6 +180,28 @@ const Game = (function () {
   function playerHitbox(p) {
     const i = CONFIG.HITBOX_INSET;
     return { x: p.x + i, y: p.y + i, w: p.w - 2 * i, h: p.h - 2 * i };
+  }
+
+  // The rectangles that can actually kill you. Stone fills its whole box, but
+  // the flyers' sprites have empty corners, so a single rectangle would kill
+  // you in clear air. These boxes follow the art grids in render.js:
+  //   Bird (6 rows, 6 px each): only the solid body rows 2-4 count. The wings
+  //     flap through rows 0-1 and 4-5, so they are left out.
+  //   Dragon (19 rows, 8 px each): the body ends at the feet (rows 0-15), and
+  //     the tail hangs below on the right (rows 16-18, columns 9-11).
+  function obstacleHitboxes(o) {
+    if (o.type === 'bird') {
+      const px = o.h / 6;
+      return [{ x: o.x, y: o.y + 2 * px, w: o.w, h: 3 * px }];
+    }
+    if (o.type === 'dragon') {
+      const px = o.h / 19;
+      return [
+        { x: o.x, y: o.y, w: o.w, h: 16 * px },
+        { x: o.x + 9 * px, y: o.y + 16 * px, w: 3 * px, h: 3 * px },
+      ];
+    }
+    return [o];
   }
 
   // input = { jumpHeld: boolean, duckHeld: boolean }
@@ -273,17 +292,17 @@ const Game = (function () {
 
     // ---- Collision --------------------------------------------------------
     const hit = playerHitbox(p);
-    for (const o of state.obstacles) {
-      if (overlaps(hit, o)) {
-        state.gameOver = true;
-        state.deadTime = 0;
-        state.events.push('die');
-        break;
-      }
+    const touching = state.obstacles.some(function (o) {
+      return obstacleHitboxes(o).some(function (box) { return overlaps(hit, box); });
+    });
+    if (touching) {
+      state.gameOver = true;
+      state.deadTime = 0;
+      state.events.push('die');
     }
   }
 
-  return { CONFIG, createState, update, overlaps, playerHitbox, spawnScale };
+  return { CONFIG, createState, update, overlaps, playerHitbox, obstacleHitboxes, spawnScale };
 })();
 
 if (typeof module !== 'undefined') module.exports = Game;
